@@ -2,13 +2,13 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware 
 from pydantic import BaseModel, Field, field_validator
 import joblib
-import os 
+import gcsfs
+import os
 import uvicorn
 import io
 import requests
 import zipfile
-from google.cloud import storage
-import json
+from sklearn.tree import DecisionTreeClassifier
 from google.cloud import storage
 
 
@@ -29,6 +29,12 @@ app = FastAPI(
     description="API for predicting crop production using a Random Forest model",
     version="1.0.0")
 
+
+
+
+import json
+import os
+from google.cloud import storage
 
 def download_model_from_gcs():
     """Download the model from Google Cloud Storage (GCS) if it does not exist locally."""
@@ -149,6 +155,14 @@ def download_supporting_files():
 
 
 
+
+
+
+# app = FastAPI(
+#     title="Crop Production Prediction API",
+#     description="API for predicting crop production using a Random Forest model",
+#     version="1.0.0"
+# )
 try:
     download_supporting_files()
     if download_model_from_gcs():
@@ -157,6 +171,15 @@ except Exception as e:
     model = None
     print(f"Failed to download model or supporting files: {e}")
     raise
+
+# Download model and supporting files when the application starts
+# try:
+#     model_path = download_model_from_gcs()
+#     download_supporting_files()
+# except Exception as e:
+#     print(f"Failed to download model or supporting files: {e}")
+#     # You might want to handle this more gracefully in a production environment
+#     raise
 
 app.add_middleware(
     CORSMiddleware,
