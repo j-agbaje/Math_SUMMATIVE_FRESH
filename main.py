@@ -2,7 +2,6 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware 
 from pydantic import BaseModel, Field, field_validator
 import joblib
-import gcsfs
 import os
 import uvicorn
 import io
