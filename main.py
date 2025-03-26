@@ -196,6 +196,10 @@ class CropInput(BaseModel):
     Season: str = Field(..., description="Growing season (e.g., Kharif, Rabi)")
     Crop: str = Field(..., description="Type of crop")
 
+
+    def model_dump(self, **kwargs):
+        return super().model_dump(**kwargs)
+
     # Validator for Area
     @field_validator('Area')
     @classmethod
