@@ -432,7 +432,7 @@ async def predict(input_data: CropInput):
 #     Reloads the model by downloading and extracting it again.
 #     """
 #     if download_model_from_gcs() and extract_and_load_model():
-#         return {"message": "Model reloaded successfully"}
+#         return {"message": "Model reloaded successfully"}quire
 #     else:
 #         raise HTTPException(status_code=500, detail="Failed to reload model")
     
