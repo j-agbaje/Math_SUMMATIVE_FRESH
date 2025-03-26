@@ -18,7 +18,7 @@ from google.cloud import storage
 
 
 
-MODEL_URL = "https://storage.googleapis.com/fast_api_crop_production/best_model.zip"
+MODEL_URL = "https://storage.googleapis.com/fast_api_crop_production/model.pkl"
 TARGET_ENCODINGS_URL = "https://storage.googleapis.com/fast_api_crop_production/target_encodings.pkl"
 LOW_IMPORTANCE_FEATURES_URL = "https://storage.googleapis.com/fast_api_crop_production/low_importance_features.pkl"
 
@@ -67,7 +67,7 @@ async def load_model_from_gcs(max_retries=3):
             fs = gcsfs.GCSFileSystem(token=credentials_dict)
             
             # Path to the model in GCS
-            model_path = "gs://fast_api_crop_production/best_model.pkl"
+            model_path = "gs://fast_api_crop_production/model.pkl"
             
             # Load model directly from GCS
             with fs.open(model_path, 'rb') as f:
