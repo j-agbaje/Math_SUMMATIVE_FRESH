@@ -444,15 +444,6 @@ async def predict(input_data: CropInput):
     
     try:
         # Convert Pydantic model to dictionary
-        features = {
-    "Area": input_data.Area,
-    "Crop_Year": input_data.Crop_Year,
-    "State_Name": input_data.State_Name,
-    "District_Name": input_data.District_Name,
-    "Season": input_data.Season,
-    "Crop": input_data.Crop
-
-}
         input_dict = input_data.model_dump()
         print("Received Input Data:", input_dict)
         
