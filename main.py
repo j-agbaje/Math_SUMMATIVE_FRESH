@@ -197,7 +197,7 @@ class CropInput(BaseModel):
     Crop: str = Field(..., description="Type of crop")
 
 
-    def model_dump(self, **kwargs):
+    def to_dict(self, **kwargs):
         return super().model_dump(**kwargs)
 
     # Validator for Area
@@ -448,7 +448,7 @@ async def predict(input_data: CropInput):
     
     try:
         # Convert Pydantic model to dictionary
-        input_dict = input_data.model_dump()
+        input_dict = input_data.to_dict()
         print("Received Input Data:", input_dict)
         
         # Get prediction
