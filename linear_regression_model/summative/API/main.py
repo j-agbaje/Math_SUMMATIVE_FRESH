@@ -2,23 +2,17 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware 
 from pydantic import BaseModel, Field, field_validator
 import joblib
+import gcsfs
 import os
 import uvicorn
-import asyncio
-from functools import lru_cache
+import io
 import requests
 import zipfile
 from sklearn.tree import DecisionTreeClassifier
 from google.cloud import storage
-import numpy as np
-import pandas as pd
-import gcsfs
-import json
-from google.cloud import storage
 
 
-
-MODEL_URL = "https://storage.googleapis.com/fast_api_crop_production/model.pkl"
+MODEL_URL = "https://storage.googleapis.com/fast_api_crop_production/best_model.zip"
 TARGET_ENCODINGS_URL = "https://storage.googleapis.com/fast_api_crop_production/target_encodings.pkl"
 LOW_IMPORTANCE_FEATURES_URL = "https://storage.googleapis.com/fast_api_crop_production/low_importance_features.pkl"
 
@@ -28,7 +22,7 @@ global_target_encodings = None
 global_low_importance_features = None
 
 MODEL_FILENAME = "best_model.pkl"
-MODEL_ZIP = "best_model.zip"
+MODEL_ZIP = "best_model_zipfile.zip"
 
 app = FastAPI(
     title="Crop Production Prediction API",
@@ -38,96 +32,146 @@ app = FastAPI(
 
 
 
-@lru_cache(maxsize=1)
-def load_gcs_credentials():
-    """Safely load and parse GCS credentials."""
-    credentials_json = os.getenv("GOOGLE_APPLICATION_CREDENTIALS_JSON")
-    if not credentials_json:
-        raise ValueError("GCS credentials not found. Ensure GOOGLE_APPLICATION_CREDENTIALS_JSON is set.")
-    return json.loads(credentials_json)
+import json
+import os
+from google.cloud import storage
 
-async def load_model_from_gcs(max_retries=3):
+def download_model_from_gcs():
+    """Download the model from Google Cloud Storage (GCS) if it does not exist locally."""
+    try:
+        model_zip = os.path.join(os.getcwd(), "best_model_zipfile.zip")
+
+        if os.path.exists(model_zip):
+            print(f"File {model_zip} already exists. Skipping download.")
+            return True
+
+        # Load credentials from Render environment variable
+        credentials_json = os.getenv("GOOGLE_APPLICATION_CREDENTIALS_JSON")
+        if not credentials_json:
+            raise ValueError("GCS credentials not found. Ensure GOOGLE_APPLICATION_CREDENTIALS_JSON is set.")
+
+        credentials_dict = json.loads(credentials_json)
+
+        # Save credentials to a temporary file
+        temp_credentials_path = "/tmp/gcs_credentials.json"
+        with open(temp_credentials_path, "w") as temp_file:
+            json.dump(credentials_dict, temp_file)
+
+        # Set environment variable for Google Cloud authentication
+        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = temp_credentials_path
+
+        # Define your GCS bucket and model path
+        BUCKET_NAME = "fast_api_crop_production"  # Replace with your actual bucket name
+        SOURCE_BLOB_NAME = "best_model_zipfile.zip"  # Replace with the path in GCS
+
+        # Initialize the Google Cloud Storage client
+        client = storage.Client()
+        bucket = client.bucket(BUCKET_NAME)
+        blob = bucket.blob(SOURCE_BLOB_NAME)
+
+        # Ensure the directory exists
+        os.makedirs(os.path.dirname(model_zip), exist_ok=True)
+
+        # Download the model from GCS
+        blob.download_to_filename(model_zip)
+
+        print(f"Successfully downloaded {model_zip} from GCS.")
+        return True
+
+    except Exception as e:
+        print(f"Error downloading model from GCS: {e}")
+        return False
+
+    
+
+
+def extract_and_load_model():
     """
-    Load model from Google Cloud Storage with retry mechanism.
-    
-    Args:
-        max_retries (int): Number of times to retry loading the model
-    
-    Returns:
-        Loaded model object
+    Extracts bestmodel.pkl from the ZIP file (if not already extracted) and loads it into memory.
     """
     global global_model
-    
-    for attempt in range(max_retries):
-        try:
-            # Get credentials
-            credentials_dict = load_gcs_credentials()
-            
-            # Create GCS Filesystem
-            fs = gcsfs.GCSFileSystem(token=credentials_dict)
-            
-            # Path to the model in GCS
-            model_path = "gs://fast_api_crop_production/model.pkl"
-            
-            # Load model directly from GCS
-            with fs.open(model_path, 'rb') as f:
-                global_model = joblib.load(f)
-            
-            print("Model loaded successfully from Google Cloud Storage.")
-            return global_model
-        
-        except Exception as e:
-            print(f"Attempt {attempt + 1} failed. Error: {str(e)}")
-            if attempt == max_retries - 1:
-                raise HTTPException(
-                    status_code=500, 
-                    detail=f"Failed to load model after {max_retries} attempts: {str(e)}"
-                )
-            await asyncio.sleep(2 ** attempt)  # Exponential backoff
 
-async def load_supporting_files_from_gcs(max_retries=3):
-    """
-    Load supporting files from Google Cloud Storage with retry mechanism.
-    
-    Args:
-        max_retries (int): Number of times to retry loading the files
-    
-    Returns:
-        Tuple of (target_encodings, low_importance_features)
-    """
-    global global_target_encodings, global_low_importance_features
-    
-    for attempt in range(max_retries):
+
+     # If the model file already exists, load it without extracting again
+    if os.path.exists(MODEL_FILENAME):
         try:
-            # Get credentials
-            credentials_dict = load_gcs_credentials()
-            
-            # Create GCS Filesystem
-            fs = gcsfs.GCSFileSystem(token=credentials_dict)
-            
-            # Paths to supporting files in GCS
-            target_encodings_path = "gs://fast_api_crop_production/target_encodings.pkl"
-            low_importance_features_path = "gs://fast_api_crop_production/low_importance_features.pkl"
-            
-            # Load target encodings
-            with fs.open(target_encodings_path, 'rb') as f:
-                global_target_encodings = joblib.load(f)
-            
-            # Load low importance features
-            with fs.open(low_importance_features_path, 'rb') as f:
-                global_low_importance_features = joblib.load(f)
-            
-            print("Supporting files loaded successfully from Google Cloud Storage.")
-            return global_target_encodings, global_low_importance_features
-        
+            # Load the model using joblib (since the model might have been saved using joblib)
+            global_model = joblib.load(MODEL_FILENAME)
+            print("Model loaded successfully from the local file.")
+            return True
         except Exception as e:
-            print(f"Attempt {attempt + 1} failed. Error: {str(e)}")
-            if attempt == max_retries - 1:
-                raise HTTPException(
-                    status_code=500, 
-                    detail=f"Failed to load supporting files after {max_retries} attempts: {str(e)}"
-                )
-            await asyncio.sleep(2 ** attempt)
+            print(f"Error loading model: {e}")
+            return False
+
+    # If the model file does not exist, check for the ZIP file
+    if os.path.exists(MODEL_ZIP):
+        try:
+            with zipfile.ZipFile(MODEL_ZIP, "r") as zip_ref:
+                zip_ref.extractall(".")
+            
+            # Ensure extraction was successful before loading
+            if os.path.exists(MODEL_FILENAME):  
+                global_model = joblib.load(MODEL_FILENAME)
+                print(f"Model extracted and loaded from {MODEL_FILENAME}.")
+                return True
+            else:
+                print(f"Extracted model file {MODEL_FILENAME} not found.")
+                return False
+        except zipfile.BadZipFile:
+            print("Invalid ZIP file.")
+            return False
+    else:
+        print(f"Model ZIP file {MODEL_ZIP} not found.")
+    
+    return False
+
+
+
+
+def download_supporting_files():
+    """
+    Download additional supporting files for the model.
+    """
+    try:
+        # Define the URLs for target encodings and low importance features
+        target_encodings_url = "https://storage.googleapis.com/fast_api_crop_production/target_encodings.pkl"
+        low_importance_features_url = "https://storage.googleapis.com/fast_api_crop_production/low_importance_features.pkl"
+        
+        # Download target encodings
+        response_encodings = requests.get(target_encodings_url)
+        response_encodings.raise_for_status()
+        with open('target_encodings.pkl', 'wb') as encodings_file:
+            encodings_file.write(response_encodings.content)
+        
+        # Download low importance features
+        response_features = requests.get(low_importance_features_url)
+        response_features.raise_for_status()
+        with open('low_importance_features.pkl', 'wb') as features_file:
+            features_file.write(response_features.content)
+        
+    except Exception as e:
+        print(f"Error downloading supporting files: {e}")
+        raise
+
+
+
+
+
+
+# app = FastAPI(
+#     title="Crop Production Prediction API",
+#     description="API for predicting crop production using a Random Forest model",
+#     version="1.0.0"
+# )
+try:
+    download_supporting_files()
+    if download_model_from_gcs():
+         extract_and_load_model()
+except Exception as e:
+    model = None
+    print(f"Failed to download model or supporting files: {e}")
+    raise
+
 # Download model and supporting files when the application starts
 # try:
 #     model_path = download_model_from_gcs()
@@ -152,10 +196,6 @@ class CropInput(BaseModel):
     District_Name: str = Field(..., min_length=2, description="Name of the district")
     Season: str = Field(..., description="Growing season (e.g., Kharif, Rabi)")
     Crop: str = Field(..., description="Type of crop")
-
-
-    def to_dict(self, **kwargs):
-        return super().model_dump(**kwargs)
 
     # Validator for Area
     @field_validator('Area')
@@ -318,24 +358,36 @@ class PredictionResponse(BaseModel):
 
 
 # Function to predict crop production
-def predict_crop_production(
-    input_data, 
-    model, 
-    target_encodings, 
-    low_importance_features
-):
+def predict_crop_production(input_data, model_path='bestmodel.pkl',
+                        target_encodings_path='target_encodings.pkl',
+                        low_importance_features_path='low_importance_features.pkl'):
     """
     Predicts crop production using the trained Random Forest model.
     
     Parameters:
-    - input_data (dict): A dictionary containing the input features
-    - model: Loaded Random Forest model
-    - target_encodings: Dictionary of target encodings for categorical features
-    - low_importance_features: List of features to drop
+    - input_data (dict): A dictionary containing the input features:
+        - 'Area': Area under cultivation
+        - 'Crop_Year': Year of cultivation
+        - 'State_Name': Name of the state
+        - 'District_Name': Name of the district
+        - 'Season': Growing season
+        - 'Crop': Type of crop
+    - model_path (str): Path to the saved model
+    - target_encodings_path (str): Path to the saved target encodings
+    - low_importance_features_path (str): Path to the low-importance features
     
     Returns:
     - float: Predicted crop production in tons
     """
+    import numpy as np
+    import pandas as pd
+    import joblib
+    
+    # Load all saved objects
+    model = joblib.load(model_path)
+    target_encodings = joblib.load(target_encodings_path)
+    low_importance_features = joblib.load(low_importance_features_path)
+    
     # Convert input data to DataFrame
     input_df = pd.DataFrame([input_data])
     
@@ -351,6 +403,7 @@ def predict_crop_production(
     for col in categorical_cols:
         if col in input_df_copy.columns:
             # Map the categorical values using the same encoding as in training
+            # target_encodings[col] is a Series with index=category and values=encoding
             input_df_copy[col] = input_df_copy[col].map(lambda x: target_encodings[col].get(x) if x in target_encodings[col].index else None)
     
     # Handle unseen categories (NaN values) using the mean of training encodings
@@ -389,52 +442,53 @@ def predict_crop_production(
 # Create prediction endpoint
 @app.post("/predict", response_model=PredictionResponse)
 async def predict(input_data: CropInput):
-    global global_model, global_target_encodings, global_low_importance_features
-    
-    # Load model and supporting files if not already loaded
-    if global_model is None or global_target_encodings is None or global_low_importance_features is None:
-        try:
-            # Load model and supporting files concurrently
-            global_model, (global_target_encodings, global_low_importance_features) = await asyncio.gather(
-                load_model_from_gcs(),
-                load_supporting_files_from_gcs()
-            )
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Failed to load model or supporting files: {str(e)}")
     
     try:
         # Convert Pydantic model to dictionary
-        input_dict = input_data.to_dict()
+        features = {
+    "Area": input_data.Area,
+    "Crop_Year": input_data.Crop_Year,
+    "State_Name": input_data.State_Name,
+    "District_Name": input_data.District_Name,
+    "Season": input_data.Season,
+    "Crop": input_data.Crop
+
+}
+        input_dict = input_data.model_dump()
         print("Received Input Data:", input_dict)
         
         # Get prediction
         prediction = predict_crop_production(
-            input_dict,
-            model=global_model,
-            target_encodings=global_target_encodings,
-            low_importance_features=global_low_importance_features
+            input_dict, 
+            model_path='best_model.pkl',
+            target_encodings_path='target_encodings.pkl',
+            low_importance_features_path='low_importance_features.pkl'
         )
+
+        # if model is None:
+        #         raise HTTPException(status_code=500, detail="Model is not loaded. Try reloading.")
+
+
         
         # Return prediction and input data
         return {
             "predicted_production": f"{float(prediction):.2f}",  # Ensures exactly 2 decimal places
             "input_data": input_data
-        }
-    
+}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Prediction error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Prediction error: {str(e)}") 
     
 
 
-# @app.get("/reload/")
-# async def reload_model():
-#     """
-#     Reloads the model by downloading and extracting it again.
-#     """
-#     if download_model_from_gcs() and extract_and_load_model():
-#         return {"message": "Model reloaded successfully"}quire
-#     else:
-#         raise HTTPException(status_code=500, detail="Failed to reload model")
+@app.get("/reload/")
+async def reload_model():
+    """
+    Reloads the model by downloading and extracting it again.
+    """
+    if download_model_from_gcs() and extract_and_load_model():
+        return {"message": "Model reloaded successfully"}
+    else:
+        raise HTTPException(status_code=500, detail="Failed to reload model")
     
 
 
@@ -449,4 +503,5 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     print(f"Attempting to run on port {port}")
     uvicorn.run("main:app", host="0.0.0.0", port=port)
+
 
