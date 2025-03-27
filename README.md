@@ -1,6 +1,6 @@
 # Math_for_Machine_Learning_Summative
 
-Youtube video link: [https://www.youtube.com/watch?v=s0ab0CdGWMo&ab_channel=CONMEBOL&t=0s](https://www.youtube.com/watch?v=s0ab0CdGWMo&ab_channel=CONMEBOL&t=0s)
+Youtube video link: [https://youtu.be/Qye2uIq3JIY)
 
 ## Mission of the Project
 Our mission is to improve agricultural productivity information using data-driven technological products. By leveraging a large crop production dataset, we aim to create a model that predicts crop yields based on various input features, supporting farmers, government agencies, and other stakeholders in making informed decisions.
